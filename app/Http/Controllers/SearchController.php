@@ -29,22 +29,29 @@ class SearchController extends Controller
     {
         $request->validate([
             'q' => 'required|string|min:1|max:255',
-            'top_k' => 'sometimes|integer|min:1|max:50'
+            'top_k' => 'sometimes|integer|min:1|max:50',
+            'category' => 'sometimes|string|max:100'
         ]);
 
         $query = $request->input('q');
         $topK = $request->input('top_k', 10);
+        $category = $request->input('category', '');
 
-        Log::info('Search request received', ['query' => $query, 'topK' => $topK]);
+        Log::info('Search request received', [
+            'query' => $query,
+            'topK' => $topK,
+            'category' => $category
+        ]);
 
-        $searchResult = $this->searchService->searchNews($query, $topK);
+        $searchResult = $this->searchService->searchNews($query, $topK, $category);
 
         if ($request->wantsJson()) {
             return response()->json($searchResult);
         }
 
         return view('search.results', array_merge($searchResult, [
-            'query' => $query
+            'query' => $query,
+            'selected_category' => $category
         ]));
     }
 

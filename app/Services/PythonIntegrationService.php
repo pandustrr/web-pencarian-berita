@@ -14,17 +14,14 @@ class PythonIntegrationService
         $this->pythonApiUrl = env('PYTHON_API_URL', 'http://localhost:5000');
     }
 
-    public function initializeModel($bbcPath = null, $indoPath = null)
+    public function initializeModel($dataPath = null)
     {
         try {
-            Log::info('Initializing Python model with multiple datasets...', ['url' => $this->pythonApiUrl]);
+            Log::info('Initializing Python model with final dataset...', ['url' => $this->pythonApiUrl]);
 
             $payload = [];
-            if ($bbcPath) {
-                $payload['bbc_path'] = $bbcPath;
-            }
-            if ($indoPath) {
-                $payload['indo_path'] = $indoPath;
+            if ($dataPath) {
+                $payload['data_path'] = $dataPath;
             }
 
             $response = Http::timeout(120)->post("{$this->pythonApiUrl}/init", $payload);
@@ -64,14 +61,13 @@ class PythonIntegrationService
         }
     }
 
-    public function search($query, $topK = 10, $category = '', $source = '')
+    public function search($query, $topK = 10, $category = '')
     {
         try {
             Log::info('Sending search to Python service', [
                 'query' => $query,
                 'topK' => $topK,
-                'category' => $category,
-                'source' => $source
+                'category' => $category
             ]);
 
             $payload = [
@@ -81,10 +77,6 @@ class PythonIntegrationService
 
             if ($category) {
                 $payload['category'] = $category;
-            }
-
-            if ($source) {
-                $payload['source'] = $source;
             }
 
             $response = Http::timeout(30)->post("{$this->pythonApiUrl}/search", $payload);
