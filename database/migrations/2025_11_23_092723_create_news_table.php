@@ -10,13 +10,17 @@ return new class extends Migration
     {
         Schema::create('news', function (Blueprint $table) {
             $table->id();
-            $table->string('title');
-            $table->text('content');
-            $table->text('processed_content')->nullable();
+            $table->string('title')->nullable();
+            $table->text('original_text');
+            $table->text('translated_text')->nullable();
+            $table->text('processed_text');
             $table->string('category')->nullable();
-            $table->string('source');
-            $table->decimal('similarity_score', 5, 4)->nullable();
+            $table->string('source')->default('Kaggle');
             $table->timestamps();
+
+            $table->fullText(['processed_text']);
+            $table->index(['category']);
+            $table->index(['source']);
         });
     }
 

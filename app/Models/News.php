@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 
 class News extends Model
 {
@@ -11,24 +11,20 @@ class News extends Model
 
     protected $fillable = [
         'title',
-        'content',
-        'processed_content',
+        'original_text',
+        'translated_text',
+        'processed_text',
         'category',
-        'source',
-        'similarity_score'
+        'source'
     ];
 
     protected $casts = [
-        'similarity_score' => 'decimal:4'
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function getExcerptAttribute()
     {
-        return substr($this->content, 0, 200) . (strlen($this->content) > 200 ? '...' : '');
-    }
-
-    public function getSimilarityPercentAttribute()
-    {
-        return $this->similarity_score ? round($this->similarity_score * 100, 2) : 0;
+        return \Illuminate\Support\Str::limit($this->original_text, 200);
     }
 }

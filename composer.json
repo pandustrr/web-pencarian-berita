@@ -10,6 +10,7 @@
         "guzzlehttp/guzzle": "^7.10",
         "laravel/framework": "^11.31",
         "laravel/tinker": "^2.9",
+        "league/csv": "^9.27",
         "sastrawi/sastrawi": "^1.2"
     },
     "require-dev": {

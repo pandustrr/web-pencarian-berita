@@ -2,83 +2,86 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\SearchService;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 
 class SearchController extends Controller
 {
-    private $searchService;
+    private $csvController;
+    private $tfidfController;
 
-    public function __construct(SearchService $searchService)
+    public function __construct()
     {
-        $this->searchService = $searchService;
+        $this->csvController = new CsvDataController();
+        $this->tfidfController = new TfidfSearchController();
     }
 
+    /**
+     * Display homepage
+     */
     public function index()
     {
-        $systemStatus = $this->searchService->getSystemStatus();
+        $csvController = new CsvDataController();
+        $totalNews = $csvController->getTotalRecords();
 
         return view('search.index', [
-            'system_status' => $systemStatus
+            'totalNews' => $totalNews
         ]);
     }
 
+    /**
+     * Handle search request
+     */
     public function search(Request $request)
     {
         $request->validate([
-            'q' => 'required|string|min:1|max:255',
-            'top_k' => 'sometimes|integer|min:1|max:50',
-            'category' => 'sometimes|string|max:100'
+            'query' => 'required|string|min:1|max:100',
+            'top_k' => 'sometimes|integer|min:1|max:50'
         ]);
 
-        $query = $request->input('q');
+        $query = $request->input('query');
         $topK = $request->input('top_k', 10);
-        $category = $request->input('category', '');
 
-        Log::info('Search request received', [
-            'query' => $query,
-            'topK' => $topK,
-            'category' => $category
-        ]);
+        Log::info("🔍 SEARCH STARTED", ['query' => $query, 'top_k' => $topK]);
 
-        $searchResult = $this->searchService->searchNews($query, $topK, $category);
+        try {
+            $results = $this->tfidfController->search($query, $topK);
 
-        if ($request->wantsJson()) {
-            return response()->json($searchResult);
+            Log::info("🎯 SEARCH COMPLETED", [
+                'query' => $query,
+                'final_results' => $results->count(),
+                'max_score' => $results->max('score') ?? 0
+            ]);
+
+            return view('search.results', [
+                'query' => $query,
+                'results' => $results,
+                'totalFound' => $results->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("❌ SEARCH ERROR", [
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            return back()->withErrors(['error' => 'Terjadi kesalahan dalam pencarian: ' . $e->getMessage()]);
         }
-
-        return view('search.results', array_merge($searchResult, [
-            'query' => $query,
-            'selected_category' => $category
-        ]));
     }
 
-    public function health()
+    /**
+     * Show news detail
+     */
+    public function show($id)
     {
-        $systemStatus = $this->searchService->getSystemStatus();
+        try {
+            $news = $this->csvController->getNewsById($id);
+            return view('search.detail', compact('news'));
 
-        return response()->json([
-            'laravel' => 'healthy',
-            'system_status' => $systemStatus,
-            'timestamp' => now()->toISOString()
-        ]);
-    }
-
-    public function initPython()
-    {
-        $pythonService = app(\App\Services\PythonIntegrationService::class);
-        $result = $pythonService->initializeModel();
-
-        return response()->json($result);
-    }
-
-    public function testPython()
-    {
-        $pythonService = app(\App\Services\PythonIntegrationService::class);
-        $result = $pythonService->testSearch();
-
-        return response()->json($result);
+        } catch (\Exception $e) {
+            Log::error("DETAIL ERROR", ['id' => $id, 'error' => $e->getMessage()]);
+            abort(404, 'Berita tidak ditemukan');
+        }
     }
 }
