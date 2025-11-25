@@ -9,11 +9,13 @@ use Illuminate\Support\Facades\Log;
 class SearchController extends Controller
 {
     private $csvController;
+    private $tfidfController;
     private $fallbackController;
 
     public function __construct()
     {
         $this->csvController = new CsvDataController();
+        $this->tfidfController = new TfidfSearchController();
         $this->fallbackController = new FallbackSearchController();
     }
 
@@ -30,7 +32,7 @@ class SearchController extends Controller
     }
 
     /**
-     * Handle search request
+     * Handle search request dengan TF-IDF sebagai primary
      */
     public function search(Request $request)
     {
@@ -42,21 +44,39 @@ class SearchController extends Controller
         $query = $request->input('query');
         $topK = $request->input('top_k', 10);
 
-        Log::info("🔍 SEARCH STARTED", ['query' => $query, 'top_k' => $topK]);
+        Log::info("🔍 SEARCH STARTED", ['query' => $query, 'top_k' => $topK, 'algorithm' => 'TF-IDF']);
 
         try {
-            // Use simple search for now
-            $results = $this->fallbackController->search($query, $topK);
+            $results = collect();
 
-            Log::info("✅ SEARCH COMPLETED", [
+            // Priority 1: Gunakan TF-IDF + Cosine Similarity
+            $tfidfResults = $this->tfidfController->search($query, $topK);
+            if ($tfidfResults->isNotEmpty()) {
+                $results = $tfidfResults;
+                Log::info("✅ TF-IDF SEARCH SUCCESS", ['results' => $results->count()]);
+            }
+
+            // Priority 2: Fallback ke simple search jika TF-IDF tidak menghasilkan hasil
+            if ($results->isEmpty()) {
+                $fallbackResults = $this->fallbackController->search($query, $topK);
+                if ($fallbackResults->isNotEmpty()) {
+                    $results = $fallbackResults;
+                    Log::info("🔄 FALLBACK SEARCH USED", ['results' => $results->count()]);
+                }
+            }
+
+            Log::info("🎯 SEARCH COMPLETED", [
                 'query' => $query,
-                'results_found' => $results->count()
+                'final_results' => $results->count(),
+                'algorithm' => $results->isNotEmpty() ? 'TF-IDF' : 'Fallback',
+                'max_score' => $results->max('score') ?? 0
             ]);
 
             return view('search.results', [
                 'query' => $query,
                 'results' => $results,
-                'totalFound' => $results->count()
+                'totalFound' => $results->count(),
+                'algorithm' => $results->isNotEmpty() ? 'TF-IDF + Cosine Similarity' : 'Simple Matching'
             ]);
 
         } catch (\Exception $e) {

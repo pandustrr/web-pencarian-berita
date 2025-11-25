@@ -9,16 +9,15 @@ use Illuminate\Support\Facades\Log;
 
 class CsvDataController extends Controller
 {
-    private $csvData = [];
+    private $csvData = null; // Ubah jadi null, bukan array kosong
 
     /**
-     * Load CSV data from storage - SIMPLE VERSION
+     * Load CSV data from storage - NO CACHE VERSION
      */
     public function loadCSVData()
     {
-        if (!empty($this->csvData)) {
-            return;
-        }
+        // Always reload fresh data
+        $this->csvData = null;
 
         $csvPath = base_path('storage/app/python_data/preprocessed_news.csv');
 
@@ -30,31 +29,36 @@ class CsvDataController extends Controller
 
         try {
             $file = fopen($csvPath, 'r');
-            $header = fgetcsv($file);
+            $header = fgetcsv($file); // Baca header
 
-            $this->csvData = [];
+            $data = [];
             $count = 0;
-            $maxRecords = 1000;
+            $maxRecords = 5000; // ⭐⭐ INI 5000 ⭐⭐
 
             while (($row = fgetcsv($file)) !== FALSE && $count < $maxRecords) {
-                $record = array_combine($header, $row);
+                if (count($header) === count($row)) { // Pastikan header dan row match
+                    $record = array_combine($header, $row);
 
-                // Add default values for missing columns
-                if (!isset($record['category'])) {
-                    $record['category'] = 'General';
-                }
-                if (!isset($record['source'])) {
-                    $record['source'] = 'Berita Online';
-                }
+                    // Add default values for missing columns
+                    if (!isset($record['category'])) {
+                        $record['category'] = 'General';
+                    }
+                    if (!isset($record['source'])) {
+                        $record['source'] = 'Berita Online';
+                    }
 
-                $this->csvData[] = $record;
-                $count++;
+                    $data[] = $record;
+                    $count++;
+                }
             }
 
             fclose($file);
 
-            Log::info("✅ CSV LOADED", [
+            $this->csvData = $data;
+
+            Log::info("✅ CSV LOADED FRESH", [
                 'records' => count($this->csvData),
+                'limit' => $maxRecords,
                 'sample' => Str::limit($this->csvData[0]['text'] ?? 'No text', 50)
             ]);
 
@@ -65,12 +69,12 @@ class CsvDataController extends Controller
     }
 
     /**
-     * Get all CSV data
+     * Get all CSV data - ALWAYS FRESH
      */
     public function getAllData()
     {
-        $this->loadCSVData();
-        return $this->csvData;
+        $this->loadCSVData(); // Always reload
+        return $this->csvData ?? [];
     }
 
     /**
@@ -78,7 +82,7 @@ class CsvDataController extends Controller
      */
     public function getNewsById($id)
     {
-        $this->loadCSVData();
+        $this->loadCSVData(); // Always reload
 
         // Coba database dulu
         $news = News::find($id);
@@ -87,8 +91,9 @@ class CsvDataController extends Controller
         }
 
         // Fallback ke CSV
-        if (isset($this->csvData[$id])) {
-            $record = $this->csvData[$id];
+        $data = $this->csvData ?? [];
+        if (isset($data[$id])) {
+            $record = $data[$id];
             return (object) [
                 'id' => $id,
                 'title' => Str::limit($record['text'] ?? '', 200),
@@ -115,8 +120,8 @@ class CsvDataController extends Controller
             return $dbCount;
         }
 
-        $this->loadCSVData();
-        return count($this->csvData);
+        $this->loadCSVData(); // Always reload
+        return count($this->csvData ?? []);
     }
 
     /**
@@ -124,7 +129,30 @@ class CsvDataController extends Controller
      */
     public function getSampleRecords($limit = 5)
     {
+        $this->loadCSVData(); // Always reload
+        $data = $this->csvData ?? [];
+        return array_slice($data, 0, $limit);
+    }
+
+    /**
+     * Force reload and get count
+     */
+    public function forceReload()
+    {
         $this->loadCSVData();
-        return array_slice($this->csvData, 0, $limit);
+        return count($this->csvData ?? []);
+    }
+
+    public function getDocumentsForTfidf()
+    {
+        $this->loadCSVData();
+
+        $documents = [];
+        foreach ($this->csvData as $index => $record) {
+            // Gunakan processed_text untuk TF-IDF, fallback ke original text
+            $documents[$index] = $record['processed'] ?? $record['text'] ?? '';
+        }
+
+        return $documents;
     }
 }

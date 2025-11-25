@@ -128,7 +128,7 @@ class SystemController extends Controller
             'csvExists' => $csvExists,
             'csvPath' => $csvPath,
             'csvSize' => $csvSize,
-            'csvCount' => count($sampleRecords) > 0 ? 1000 : 0, // Estimate
+            'csvCount' => count($sampleRecords),
             'dbCount' => $dbCount,
             'sampleRecords' => $sampleRecords,
             'sampleDbRecords' => $sampleDbRecords,

@@ -11,95 +11,88 @@ class TfidfSearchController extends Controller
     private $tfidfMatrix = null;
     private $featureNames = [];
     private $vocabulary = [];
+    private $documents = [];
 
     private $csvController;
-    private $fallbackController;
 
     public function __construct()
     {
         $this->csvController = new CsvDataController();
-        $this->fallbackController = new FallbackSearchController();
     }
 
     /**
-     * Main search method
+     * Main search method dengan TF-IDF + Cosine Similarity
      */
     public function search($query, $topK = 10)
     {
-        $results = collect();
+        Log::info("🎯 TF-IDF SEARCH STARTED", ['query' => $query, 'top_k' => $topK]);
 
-        // Strategy 1: Try TF-IDF search
-        $tfidfResults = $this->searchWithTfidf($query, $topK);
-        if ($tfidfResults->isNotEmpty()) {
-            $results = $tfidfResults;
-            Log::info("✅ TF-IDF SEARCH SUCCESS", ['results' => $results->count()]);
-        }
+        try {
+            // Dapatkan documents untuk TF-IDF
+            $this->documents = $this->csvController->getDocumentsForTfidf();
 
-        // Strategy 2: Try fallback search if TF-IDF fails
-        if ($results->isEmpty()) {
-            $fallbackResults = $this->fallbackController->search($query, $topK);
-            if ($fallbackResults->isNotEmpty()) {
-                $results = $fallbackResults;
-                Log::info("✅ FALLBACK SEARCH SUCCESS", ['results' => $results->count()]);
+            if (empty($this->documents)) {
+                Log::warning("No documents available for TF-IDF");
+                return collect();
             }
-        }
 
-        return $results;
-    }
+            // Bangun TF-IDF matrix
+            $this->buildTfidfMatrix();
 
-    /**
-     * Search using TF-IDF algorithm
-     */
-    private function searchWithTfidf($query, $topK)
-    {
-        $documents = $this->csvController->getDocumentsForTfidf();
+            // Lakukan pencarian dengan Cosine Similarity
+            $results = $this->performCosineSimilaritySearch($query, $topK);
 
-        if (empty($documents)) {
-            Log::warning("No documents available for TF-IDF search");
+            Log::info("✅ TF-IDF SEARCH COMPLETED", [
+                'query' => $query,
+                'results_found' => count($results),
+                'vocabulary_size' => count($this->vocabulary)
+            ]);
+
+            return $this->formatResults($results);
+
+        } catch (\Exception $e) {
+            Log::error("❌ TF-IDF SEARCH ERROR", [
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
             return collect();
         }
-
-        Log::debug("🏗️ BUILDING TF-IDF MATRIX", [
-            'documents_count' => count($documents),
-            'query' => $query
-        ]);
-
-        $this->buildTfidfMatrix(array_values($documents));
-        $results = $this->performSearch($query, $topK);
-
-        return $this->formatResults($results, $documents);
     }
 
     /**
-     * Build TF-IDF matrix from documents
+     * Bangun TF-IDF Matrix sesuai rumus di laporan
      */
-    private function buildTfidfMatrix($documents)
+    private function buildTfidfMatrix()
     {
-        $this->vocabulary = $this->buildVocabulary($documents);
-        $this->featureNames = array_keys($this->vocabulary);
+        // 1. Bangun vocabulary
+        $this->buildVocabulary();
 
+        // 2. Hitung TF-IDF untuk setiap document
         $this->tfidfMatrix = [];
-        foreach ($documents as $docIndex => $document) {
-            $tfidfVector = $this->calculateTfIdf($document, $this->vocabulary, $documents);
+        $documentsArray = array_values($this->documents);
+
+        foreach ($documentsArray as $docIndex => $document) {
+            $tfidfVector = $this->calculateTfIdfVector($document, $documentsArray);
             $this->tfidfMatrix[$docIndex] = $tfidfVector;
         }
 
-        Log::debug("TF-IDF MATRIX BUILT", [
+        Log::debug("🏗️ TF-IDF MATRIX BUILT", [
             'vocabulary_size' => count($this->vocabulary),
-            'documents_count' => count($documents)
+            'documents_count' => count($this->documents),
+            'matrix_shape' => [count($this->tfidfMatrix), count($this->featureNames)]
         ]);
     }
 
     /**
-     * Build vocabulary from documents
+     * Bangun vocabulary dari semua documents
      */
-    private function buildVocabulary($documents)
+    private function buildVocabulary()
     {
         $vocabulary = [];
-        $docCount = count($documents);
+        $docCount = count($this->documents);
 
-        foreach ($documents as $document) {
-            $terms = $this->tokenizeText($document);
+        foreach ($this->documents as $document) {
+            $terms = $this->preprocessText($document);
             $uniqueTerms = array_unique($terms);
 
             foreach ($uniqueTerms as $term) {
@@ -110,26 +103,31 @@ class TfidfSearchController extends Controller
             }
         }
 
-        // Filter terms
-        $vocabulary = array_filter($vocabulary, function($count) use ($docCount) {
-            return $count >= 1 && $count <= $docCount * 0.95;
+        // Filter terms yang terlalu umum atau terlalu jarang
+        $this->vocabulary = array_filter($vocabulary, function($docFreq) use ($docCount) {
+            return $docFreq >= 2 && $docFreq <= $docCount * 0.8;
         });
 
-        return $vocabulary;
+        $this->featureNames = array_keys($this->vocabulary);
     }
 
     /**
-     * Calculate TF-IDF for a document
+     * Hitung vektor TF-IDF untuk sebuah document
      */
-    private function calculateTfIdf($document, $vocabulary, $documents)
+    private function calculateTfIdfVector($document, $allDocuments)
     {
-        $terms = $this->tokenizeText($document);
-        $termCount = count($terms);
+        $terms = $this->preprocessText($document);
+        $totalTerms = count($terms);
         $tfidfVector = [];
 
-        foreach (array_keys($vocabulary) as $term) {
-            $tf = $this->termFrequency($term, $terms, $termCount);
-            $idf = $this->inverseDocumentFrequency($term, $documents);
+        foreach ($this->featureNames as $term) {
+            // Term Frequency (TF)
+            $tf = $this->calculateTermFrequency($term, $terms, $totalTerms);
+
+            // Inverse Document Frequency (IDF)
+            $idf = $this->calculateInverseDocumentFrequency($term, $allDocuments);
+
+            // TF-IDF = TF * IDF
             $tfidfVector[] = $tf * $idf;
         }
 
@@ -137,9 +135,9 @@ class TfidfSearchController extends Controller
     }
 
     /**
-     * Calculate term frequency
+     * Hitung Term Frequency (TF) sesuai rumus laporan
      */
-    private function termFrequency($term, $terms, $totalTerms)
+    private function calculateTermFrequency($term, $terms, $totalTerms)
     {
         $count = 0;
         foreach ($terms as $t) {
@@ -147,69 +145,114 @@ class TfidfSearchController extends Controller
                 $count++;
             }
         }
+        // TF(t,d) = f_t,d / Σf_i,d
         return $totalTerms > 0 ? $count / $totalTerms : 0;
     }
 
     /**
-     * Calculate inverse document frequency
+     * Hitung Inverse Document Frequency (IDF) sesuai rumus laporan
      */
-    private function inverseDocumentFrequency($term, $documents)
+    private function calculateInverseDocumentFrequency($term, $allDocuments)
     {
-        $docCount = count($documents);
+        $docCount = count($allDocuments);
         $containingDocs = 0;
 
-        foreach ($documents as $document) {
-            if (stripos($document, $term) !== false) {
+        foreach ($allDocuments as $document) {
+            $docTerms = $this->preprocessText($document);
+            if (in_array($term, $docTerms)) {
                 $containingDocs++;
             }
         }
 
+        // IDF(t) = log(N / df_t) + 1
         return $containingDocs > 0 ? log($docCount / $containingDocs) + 1 : 1;
     }
 
     /**
-     * Perform search using cosine similarity
+     * Preprocessing text sesuai metodologi laporan
      */
-    private function performSearch($query, $topK)
+    private function preprocessText($text)
     {
-        if ($this->tfidfMatrix === null || empty($this->featureNames)) {
-            return [];
-        }
+        if (empty($text)) return [];
 
-        $queryVector = $this->calculateQueryVector($query);
+        // 1. Case Folding
+        $text = mb_strtolower($text);
+
+        // 2. Cleaning (hapus karakter non-alfanumerik)
+        $text = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $text);
+
+        // 3. Tokenizing
+        $tokens = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
+
+        // 4. Stopword Removal (sederhana)
+        $stopwords = ['yang', 'dan', 'di', 'ke', 'dari', 'pada', 'untuk', 'dengan', 'ini', 'itu'];
+        $tokens = array_filter($tokens, function($token) use ($stopwords) {
+            return !in_array($token, $stopwords) && strlen($token) > 1;
+        });
+
+        // 5. Stemming (sederhana - bisa diganti dengan Sastrawi nanti)
+        $tokens = array_map(function($token) {
+            // Simple stemming untuk demonstrasi
+            if (strpos($token, 'ber') === 0 && strlen($token) > 5) {
+                return substr($token, 3);
+            }
+            if (strpos($token, 'ter') === 0 && strlen($token) > 5) {
+                return substr($token, 3);
+            }
+            if (strpos($token, 'me') === 0 && strlen($token) > 4) {
+                return substr($token, 2);
+            }
+            return $token;
+        }, $tokens);
+
+        return array_values($tokens);
+    }
+
+    /**
+     * Pencarian dengan Cosine Similarity
+     */
+    private function performCosineSimilaritySearch($query, $topK)
+    {
+        // Preprocess query
+        $queryTerms = $this->preprocessText($query);
+
+        // Hitung vektor query
+        $queryVector = $this->calculateQueryVector($queryTerms);
+
         $scores = [];
 
+        // Hitung cosine similarity dengan setiap document
         foreach ($this->tfidfMatrix as $docIndex => $docVector) {
-            $similarity = $this->cosineSimilarity($queryVector, $docVector);
-            if ($similarity > 0.001) {
+            $similarity = $this->calculateCosineSimilarity($queryVector, $docVector);
+            if ($similarity > 0.001) { // Hanya simpan yang meaningful
                 $scores[$docIndex] = $similarity;
             }
         }
 
+        // Urutkan berdasarkan similarity score (descending)
         arsort($scores);
 
-        Log::debug("SEARCH PERFORMED", [
-            'query' => $query,
+        Log::debug("🔍 COSINE SIMILARITY SEARCH", [
+            'query_terms' => $queryTerms,
+            'query_vector' => $queryVector,
             'documents_searched' => count($this->tfidfMatrix),
-            'meaningful_results' => count($scores),
-            'top_score' => !empty($scores) ? max($scores) : 0
+            'meaningful_results' => count($scores)
         ]);
 
         return array_slice($scores, 0, $topK, true);
     }
 
     /**
-     * Calculate query vector
+     * Hitung vektor query untuk TF-IDF
      */
-    private function calculateQueryVector($query)
+    private function calculateQueryVector($queryTerms)
     {
-        $queryTerms = $this->tokenizeText($query);
         $vector = array_fill(0, count($this->featureNames), 0);
 
         foreach ($queryTerms as $term) {
             $index = array_search($term, $this->featureNames);
             if ($index !== false) {
-                $vector[$index] += 1;
+                $vector[$index] += 1; // Binary representation untuk query
             }
         }
 
@@ -217,9 +260,9 @@ class TfidfSearchController extends Controller
     }
 
     /**
-     * Calculate cosine similarity
+     * Hitung Cosine Similarity antara dua vektor
      */
-    private function cosineSimilarity($vecA, $vecB)
+    private function calculateCosineSimilarity($vecA, $vecB)
     {
         $dotProduct = 0;
         $normA = 0;
@@ -235,42 +278,19 @@ class TfidfSearchController extends Controller
             return 0;
         }
 
+        // Cosine Similarity = A·B / (||A|| * ||B||)
         return $dotProduct / (sqrt($normA) * sqrt($normB));
     }
 
     /**
-     * Tokenize text for Indonesian language
+     * Format results untuk ditampilkan
      */
-    private function tokenizeText($text)
-    {
-        if (empty($text)) return [];
-
-        $text = preg_replace('/[^\p{L}\p{N}\s\-]/u', ' ', $text);
-        $text = mb_strtolower($text);
-
-        $tokens = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
-
-        $tokens = array_filter($tokens, function($token) {
-            if (strlen($token) >= 2) return true;
-
-            $shortWords = ['ai', 'pc', 'tv', 'cd', 'dvd', 'us', 'uk', 'id', 'no', 'ok', 'm', 'kg'];
-            return in_array($token, $shortWords);
-        });
-
-        return $tokens;
-    }
-
-    /**
-     * Format search results
-     */
-    private function formatResults($results, $documents)
+    private function formatResults($results)
     {
         $newsItems = collect();
 
         foreach ($results as $docIndex => $score) {
-            if ($score < 0.01) continue;
-
-            $recordIndex = array_keys($documents)[$docIndex];
+            $recordIndex = array_keys($this->documents)[$docIndex];
 
             try {
                 $news = $this->csvController->getNewsById($recordIndex);
@@ -291,14 +311,15 @@ class TfidfSearchController extends Controller
     }
 
     /**
-     * Get search statistics for debugging
+     * Get TF-IDF statistics untuk debugging
      */
-    public function getSearchStats()
+    public function getTfidfStats()
     {
         return [
             'vocabulary_size' => count($this->vocabulary),
-            'matrix_size' => $this->tfidfMatrix ? count($this->tfidfMatrix) : 0,
-            'feature_names_sample' => array_slice($this->featureNames, 0, 10)
+            'documents_count' => count($this->documents),
+            'feature_names_sample' => array_slice($this->featureNames, 0, 10),
+            'matrix_shape' => $this->tfidfMatrix ? [count($this->tfidfMatrix), count($this->featureNames)] : null
         ];
     }
 }

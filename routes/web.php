@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\SystemController;
 
@@ -22,8 +23,19 @@ Route::get('/test-simple', function() {
 
     return response()->json([
         'total_records' => count($data),
-        'first_record' => $data[0] ?? 'No data',
+        'first_record_text' => Str::limit($data[0]['text'] ?? 'No text', 100),
         'status' => 'OK'
+    ]);
+});
+
+Route::get('/force-reload', function() {
+    $controller = new App\Http\Controllers\CsvDataController();
+    $newCount = $controller->forceReload();
+
+    return response()->json([
+        'message' => 'CSV data reloaded!',
+        'new_record_count' => $newCount,
+        'timestamp' => now()
     ]);
 });
 
