@@ -15,12 +15,8 @@ return new class extends Migration
             $table->text('translated_text')->nullable();
             $table->text('processed_text');
             $table->string('category')->nullable();
-            $table->string('source')->default('Kaggle');
+            $table->string('source')->default('Berita Online');
             $table->timestamps();
-
-            $table->fullText(['processed_text']);
-            $table->index(['category']);
-            $table->index(['source']);
         });
     }
 

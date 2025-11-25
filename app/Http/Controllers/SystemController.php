@@ -91,8 +91,7 @@ class SystemController extends Controller
             'csv_file' => [
                 'exists' => $csvExists,
                 'news_count' => $csvCount,
-                'path' => $csvPath,
-                'sample_record' => $csvCount > 0 ? $csvData[0] : null
+                'path' => $csvPath
             ],
             'total_records' => $dbCount + $csvCount,
             'timestamp' => now()->toISOString()
@@ -113,10 +112,10 @@ class SystemController extends Controller
         $sampleDbRecords = News::limit(5)->get();
 
         // Test search
-        $testQueries = ['gempa', 'polisi', 'emas', 'teknologi', 'ekonomi'];
+        $testQueries = ['gempa', 'polisi', 'teknologi', 'ekonomi', 'kesehatan'];
         $testResults = [];
 
-        $searchController = new TfidfSearchController();
+        $searchController = new FallbackSearchController();
         foreach ($testQueries as $testQuery) {
             $results = $searchController->search($testQuery, 3);
             $testResults[$testQuery] = [
@@ -129,7 +128,7 @@ class SystemController extends Controller
             'csvExists' => $csvExists,
             'csvPath' => $csvPath,
             'csvSize' => $csvSize,
-            'csvCount' => count($sampleRecords) * 20, // Estimate
+            'csvCount' => count($sampleRecords) > 0 ? 1000 : 0, // Estimate
             'dbCount' => $dbCount,
             'sampleRecords' => $sampleRecords,
             'sampleDbRecords' => $sampleDbRecords,
@@ -144,8 +143,8 @@ class SystemController extends Controller
     public function testSearch($query = 'gempa')
     {
         try {
-            $searchController = new TfidfSearchController();
-            $results = $searchController->search($query, 10);
+            $searchController = new FallbackSearchController();
+            $results = $searchController->search($query, 5);
 
             return response()->json([
                 'query' => $query,
@@ -153,7 +152,8 @@ class SystemController extends Controller
                 'results' => $results->map(function($item) {
                     return [
                         'score' => round($item['score'], 4),
-                        'title' => Str::limit($item['news']->original_text, 100)
+                        'title' => Str::limit($item['news']->original_text, 100),
+                        'text' => Str::limit($item['news']->original_text, 200)
                     ];
                 })->toArray()
             ]);

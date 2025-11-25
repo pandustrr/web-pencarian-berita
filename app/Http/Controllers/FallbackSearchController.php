@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\News;
 use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 
@@ -16,113 +15,67 @@ class FallbackSearchController extends Controller
     }
 
     /**
-     * Fallback search when TF-IDF fails
+     * Simple search - TEXT MATCHING ONLY
      */
     public function search($query, $topK = 10)
     {
-        $results = collect();
-
-        // Try database first
-        $dbResults = $this->searchInDatabase($query, $topK);
-        if ($dbResults->isNotEmpty()) {
-            return $dbResults;
-        }
-
-        // Try CSV search
-        $csvResults = $this->searchInCSV($query, $topK);
-        if ($csvResults->isNotEmpty()) {
-            return $csvResults;
-        }
-
-        return $results;
-    }
-
-    /**
-     * Search in database with simple matching
-     */
-    private function searchInDatabase($query, $topK)
-    {
-        $results = News::where(function($q) use ($query) {
-                $q->where('original_text', 'like', "%{$query}%")
-                  ->orWhere('processed_text', 'like', "%{$query}%")
-                  ->orWhere('title', 'like', "%{$query}%");
-            })
-            ->limit($topK)
-            ->get()
-            ->map(function($news) use ($query) {
-                $score = $this->calculateSimpleScore($news->original_text, $query);
-                return [
-                    'news' => $news,
-                    'score' => $score
-                ];
-            });
-
-        return $results->sortByDesc('score')->values();
-    }
-
-    /**
-     * Search in CSV with simple matching
-     */
-    private function searchInCSV($query, $topK)
-    {
         $csvData = $this->csvController->getAllData();
         $matches = [];
+        $queryLower = strtolower($query);
 
         foreach ($csvData as $index => $record) {
-            $text = $record['text'] ?? '';
-            $score = $this->calculateSimpleScore($text, $query);
+            $text = strtolower($record['text'] ?? '');
 
-            if ($score > 0.1) {
+            // SIMPLE MATCHING - cek apakah query ada di text
+            if (strpos($text, $queryLower) !== false) {
+                $score = $this->calculateSimpleScore($text, $queryLower);
                 $matches[] = [
-                    'news' => $this->csvController->getNewsById($index),
+                    'news' => (object) [
+                        'id' => $index,
+                        'title' => Str::limit($record['text'] ?? '', 100),
+                        'original_text' => $record['text'] ?? '',
+                        'translated_text' => $record['translated'] ?? $record['text'] ?? '',
+                        'processed_text' => $record['processed'] ?? '',
+                        'category' => $record['category'] ?? 'General',
+                        'source' => $record['source'] ?? 'CSV',
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ],
                     'score' => $score
                 ];
             }
+
+            // Stop jika sudah cukup results
+            if (count($matches) >= $topK * 2) {
+                break;
+            }
         }
 
+        // Sort by score (highest first)
         usort($matches, function($a, $b) {
             return $b['score'] <=> $a['score'];
         });
 
+        // Return top K results
         return collect(array_slice($matches, 0, $topK));
     }
 
     /**
-     * Calculate simple relevance score
+     * Simple score calculation
      */
     private function calculateSimpleScore($text, $query)
     {
-        if (empty($text)) return 0;
+        // Hitung berapa kali query muncul di text
+        $count = substr_count($text, $query);
 
-        $text = strtolower($text);
-        $query = strtolower($query);
-        $queryWords = $this->tokenizeText($query);
+        // Base score based on occurrence count
+        $score = $count * 0.2;
 
-        $score = 0;
-        foreach ($queryWords as $word) {
-            if (strlen($word) > 1) {
-                $count = substr_count($text, $word);
-                $score += $count * (strlen($word) / 10);
-            }
+        // Bonus jika query di awal text
+        if (strpos($text, $query) === 0) {
+            $score += 0.3;
         }
 
-        return min($score / 5, 0.95);
-    }
-
-    /**
-     * Simple tokenization
-     */
-    private function tokenizeText($text)
-    {
-        if (empty($text)) return [];
-
-        $text = preg_replace('/[^\p{L}\p{N}\s\-]/u', ' ', $text);
-        $text = mb_strtolower($text);
-
-        $tokens = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
-
-        return array_filter($tokens, function($token) {
-            return strlen($token) >= 2;
-        });
+        return min($score, 0.95);
     }
 }

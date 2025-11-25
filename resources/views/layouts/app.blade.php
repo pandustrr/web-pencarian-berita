@@ -80,7 +80,7 @@
                     </a>
                     <a href="{{ route('debug.info') }}"
                        class="hover:text-blue-100 transition duration-200 font-medium flex items-center {{ request()->is('debug') ? 'text-blue-100 border-b-2 border-blue-100 pb-1' : '' }}">
-                        <i class="fas fa-bug mr-1"></i>Debug
+                        <i></i>Debug
                     </a>
                 </nav>
             </div>

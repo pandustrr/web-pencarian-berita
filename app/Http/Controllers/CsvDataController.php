@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\News;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use League\Csv\Reader;
 use Illuminate\Support\Facades\Log;
 
 class CsvDataController extends Controller
@@ -13,7 +12,7 @@ class CsvDataController extends Controller
     private $csvData = [];
 
     /**
-     * Load CSV data from storage
+     * Load CSV data from storage - SIMPLE VERSION
      */
     public function loadCSVData()
     {
@@ -21,10 +20,7 @@ class CsvDataController extends Controller
             return;
         }
 
-        // Gunakan path absolut langsung
         $csvPath = base_path('storage/app/python_data/preprocessed_news.csv');
-
-        Log::info("📂 ATTEMPTING TO LOAD CSV", ['path' => $csvPath]);
 
         if (!file_exists($csvPath)) {
             Log::error("❌ CSV FILE NOT FOUND", ['path' => $csvPath]);
@@ -33,36 +29,37 @@ class CsvDataController extends Controller
         }
 
         try {
-            Log::info("📖 READING CSV FILE", [
-                'full_path' => $csvPath,
-                'file_size' => filesize($csvPath)
-            ]);
+            $file = fopen($csvPath, 'r');
+            $header = fgetcsv($file);
 
-            $csv = Reader::createFromPath($csvPath, 'r');
-            $csv->setHeaderOffset(0);
+            $this->csvData = [];
+            $count = 0;
+            $maxRecords = 1000;
 
-            $this->csvData = iterator_to_array($csv->getRecords());
+            while (($row = fgetcsv($file)) !== FALSE && $count < $maxRecords) {
+                $record = array_combine($header, $row);
 
-            // Add default values for missing columns
-            foreach ($this->csvData as &$record) {
+                // Add default values for missing columns
                 if (!isset($record['category'])) {
                     $record['category'] = 'General';
                 }
                 if (!isset($record['source'])) {
                     $record['source'] = 'Berita Online';
                 }
+
+                $this->csvData[] = $record;
+                $count++;
             }
 
-            Log::info("✅ CSV LOADED SUCCESSFULLY", [
+            fclose($file);
+
+            Log::info("✅ CSV LOADED", [
                 'records' => count($this->csvData),
-                'first_record' => isset($this->csvData[0]['text']) ? Str::limit($this->csvData[0]['text'], 100) : 'empty'
+                'sample' => Str::limit($this->csvData[0]['text'] ?? 'No text', 50)
             ]);
 
         } catch (\Exception $e) {
-            Log::error("❌ CSV READ ERROR", [
-                'path' => $csvPath,
-                'error' => $e->getMessage()
-            ]);
+            Log::error("❌ CSV READ ERROR", ['error' => $e->getMessage()]);
             $this->csvData = [];
         }
     }
@@ -120,21 +117,6 @@ class CsvDataController extends Controller
 
         $this->loadCSVData();
         return count($this->csvData);
-    }
-
-    /**
-     * Get documents for TF-IDF processing
-     */
-    public function getDocumentsForTfidf()
-    {
-        $this->loadCSVData();
-
-        $documents = [];
-        foreach ($this->csvData as $index => $record) {
-            $documents[$index] = $record['processed'] ?? $record['text'] ?? '';
-        }
-
-        return $documents;
     }
 
     /**

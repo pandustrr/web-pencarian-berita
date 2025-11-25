@@ -22,9 +22,4 @@ class News extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
-
-    public function getExcerptAttribute()
-    {
-        return \Illuminate\Support\Str::limit($this->original_text, 200);
-    }
 }

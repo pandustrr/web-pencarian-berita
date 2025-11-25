@@ -9,12 +9,12 @@ use Illuminate\Support\Facades\Log;
 class SearchController extends Controller
 {
     private $csvController;
-    private $tfidfController;
+    private $fallbackController;
 
     public function __construct()
     {
         $this->csvController = new CsvDataController();
-        $this->tfidfController = new TfidfSearchController();
+        $this->fallbackController = new FallbackSearchController();
     }
 
     /**
@@ -22,8 +22,7 @@ class SearchController extends Controller
      */
     public function index()
     {
-        $csvController = new CsvDataController();
-        $totalNews = $csvController->getTotalRecords();
+        $totalNews = $this->csvController->getTotalRecords();
 
         return view('search.index', [
             'totalNews' => $totalNews
@@ -46,12 +45,12 @@ class SearchController extends Controller
         Log::info("🔍 SEARCH STARTED", ['query' => $query, 'top_k' => $topK]);
 
         try {
-            $results = $this->tfidfController->search($query, $topK);
+            // Use simple search for now
+            $results = $this->fallbackController->search($query, $topK);
 
-            Log::info("🎯 SEARCH COMPLETED", [
+            Log::info("✅ SEARCH COMPLETED", [
                 'query' => $query,
-                'final_results' => $results->count(),
-                'max_score' => $results->max('score') ?? 0
+                'results_found' => $results->count()
             ]);
 
             return view('search.results', [
