@@ -1,3 +1,6 @@
+## 📂 Project Structure — WEB-BERITA
+
+```bash
 WEB-BERITA/
 ├── app/
 │   ├── Http/
@@ -26,4 +29,4 @@ WEB-BERITA/
 ├── routes/
 │   └── web.php                             # Semua route aplikasi
 │
-└── .env                                    
+└── .env                                    # Environment configuration file
