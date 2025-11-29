@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class SearchController extends Controller
 {
@@ -86,7 +87,7 @@ class SearchController extends Controller
     }
 
     /**
-     * Handle search - dengan stats
+     * Handle search - dengan filter results FIXED
      */
     public function search(Request $request)
     {
@@ -101,11 +102,19 @@ class SearchController extends Controller
         $algorithm = 'TF-IDF';
         $engine = 'python';
 
+        // Handle parameter 'all' dengan benar
+        $pythonTopK = $topK;
+        if ($topK === 'all') {
+            $pythonTopK = 'all'; // Kirim string 'all' ke Python
+        } else {
+            $pythonTopK = (int)$topK;
+        }
+
         // Coba Python dulu
         try {
-            $response = Http::timeout(10)->get("{$this->pythonUrl}/search", [
+            $response = Http::timeout(30)->get("{$this->pythonUrl}/search", [
                 'query' => $query,
-                'top_k' => $topK
+                'top_k' => $pythonTopK
             ]);
 
             if ($response->successful()) {
@@ -113,6 +122,14 @@ class SearchController extends Controller
                 if (!empty($data['results'])) {
                     $results = $data['results'];
                     $algorithm = 'Python TF-IDF';
+
+                    // Log untuk debugging
+                    Log::info("Python search successful", [
+                        'query' => $query,
+                        'requested_top_k' => $topK,
+                        'python_top_k' => $pythonTopK,
+                        'results_count' => count($results)
+                    ]);
                 }
             }
         } catch (\Exception $e) {
@@ -120,6 +137,11 @@ class SearchController extends Controller
             $results = $this->simpleSearch($query, $topK);
             $algorithm = 'Simple Matching';
             $engine = 'php';
+
+            Log::warning("Python search failed, using fallback", [
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
         }
 
         // Get stats untuk results page
@@ -130,12 +152,13 @@ class SearchController extends Controller
             'results' => $results,
             'algorithm' => $algorithm,
             'engine' => $engine,
-            'stats' => $stats
+            'stats' => $stats,
+            'topK' => $topK
         ]);
     }
 
     /**
-     * Simple fallback search
+     * Simple fallback search - FIXED untuk handle 'all'
      */
     private function simpleSearch($query, $topK)
     {
@@ -152,8 +175,9 @@ class SearchController extends Controller
 
             $count = 0;
             $queryLower = strtolower($query);
+            $limit = ($topK === 'all') ? 1000 : (int)$topK; // Batas maksimal 1000 untuk 'all'
 
-            while (($row = fgetcsv($file)) !== FALSE && $count < 100) {
+            while (($row = fgetcsv($file)) !== FALSE && $count < $limit) {
                 if (count($header) === count($row)) {
                     $record = array_combine($header, $row);
                     $text = strtolower($record['text'] ?? '');
@@ -168,8 +192,6 @@ class SearchController extends Controller
                             'source' => $record['source'] ?? 'CSV'
                         ];
                         $count++;
-
-                        if ($count >= $topK) break;
                     }
                 }
             }

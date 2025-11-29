@@ -92,29 +92,6 @@
         </div>
     </div>
 
-    <!-- Quick Actions -->
-    <div class="bg-white rounded-lg shadow p-6 mb-8">
-        <h2 class="text-xl font-semibold mb-4">Quick Actions</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <a href="/test-python" target="_blank"
-               class="bg-blue-500 hover:bg-blue-600 text-white text-center py-2 px-4 rounded font-medium transition duration-200">
-                <i class="fas fa-heartbeat mr-2"></i>Test Python
-            </a>
-            <a href="/system-info" target="_blank"
-               class="bg-green-500 hover:bg-green-600 text-white text-center py-2 px-4 rounded font-medium transition duration-200">
-                <i class="fas fa-info-circle mr-2"></i>System Info
-            </a>
-            <a href="{{ route('home') }}"
-               class="bg-purple-500 hover:bg-purple-600 text-white text-center py-2 px-4 rounded font-medium transition duration-200">
-                <i class="fas fa-search mr-2"></i>Search Test
-            </a>
-            <a href="http://127.0.0.1:5000/stats" target="_blank"
-               class="bg-orange-500 hover:bg-orange-600 text-white text-center py-2 px-4 rounded font-medium transition duration-200">
-                <i class="fas fa-chart-bar mr-2"></i>Python Stats
-            </a>
-        </div>
-    </div>
-
     <!-- File Check -->
     <div class="bg-white rounded-lg shadow p-6">
         <h2 class="text-xl font-semibold mb-4">File System Check</h2>

@@ -98,7 +98,7 @@ class TFIDFSearchEngine:
             return False
 
     def search(self, query: str, top_k: int = 10):
-        """Search using TF-IDF and Cosine Similarity"""
+        """Search using TF-IDF and Cosine Similarity - TANPA BATASAN"""
         if not self.is_initialized:
             logger.error("Search engine not initialized")
             return []
@@ -116,8 +116,15 @@ class TFIDFSearchEngine:
             # Calculate cosine similarity
             similarities = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
 
-            # Get top K results
-            top_indices = similarities.argsort()[-top_k:][::-1]
+            # Get top K results - TANPA BATASAN, gunakan semua yang ada similarity > 0
+            if top_k == 'all' or top_k <= 0:
+                # Ambil semua hasil dengan similarity > 0.001
+                top_indices = np.where(similarities > 0.001)[0]
+                # Urutkan berdasarkan score tertinggi
+                top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
+            else:
+                # Ambil top K results
+                top_indices = similarities.argsort()[-top_k:][::-1]
 
             results = []
             for idx in top_indices:
@@ -136,7 +143,7 @@ class TFIDFSearchEngine:
                         'source': str(doc_data['source']) if 'source' in doc_data else 'CSV'
                     })
 
-            logger.info(f"🔍 Search: '{query}' → {len(results)} results")
+            logger.info(f"🔍 Search: '{query}' → {len(results)} results (top_k: {top_k})")
             return results
 
         except Exception as e:
@@ -228,7 +235,7 @@ def get_stats():
 
 @app.route('/search', methods=['GET', 'POST'])
 def search():
-    """Search endpoint - MAIN API"""
+    """Search endpoint - MAIN API - SUPPORT ALL RESULTS"""
     try:
         # Check if engine is initialized
         if not search_engine.is_initialized:
@@ -238,16 +245,24 @@ def search():
         if request.method == 'POST':
             data = request.get_json()
             query = data.get('query', '')
-            top_k = int(data.get('top_k', 10))
+            top_k = data.get('top_k', 10)
         else:
             query = request.args.get('query', '')
-            top_k = int(request.args.get('top_k', 10))
+            top_k = request.args.get('top_k', 10)
 
         if not query:
             return jsonify({'error': 'Query parameter is required'}), 400
 
-        # Validate top_k
-        top_k = max(1, min(top_k, 50))  # Limit to 50 results
+        # Handle 'all' parameter
+        if top_k == 'all':
+            top_k = 'all'  # Kirim string 'all' ke search engine
+        else:
+            try:
+                top_k = int(top_k)
+                # Batasi maksimal 1000 untuk performance
+                top_k = min(top_k, 1000)
+            except (ValueError, TypeError):
+                top_k = 10
 
         # Perform search
         results = search_engine.search(query, top_k)
@@ -396,7 +411,7 @@ def main():
     print("   POST /init          - Manual re-initialize")
     print("\n🔍 EXAMPLE USAGE:")
     print(f"   curl http://{HOST}:{PORT}/health")
-    print(f"   curl \"http://{HOST}:{PORT}/search?query=gempa&top_k=5\"")
+    print(f'   curl "http://{HOST}:{PORT}/search?query=gempa&top_k=all"')
     print(f"   curl http://{HOST}:{PORT}/document/0")
     print("="*60)
     print("Server is running. Press Ctrl+C to stop.")
