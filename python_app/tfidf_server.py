@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
 """
-SINGLE FILE Python TF-IDF Search Engine Server
-Integrasi Laravel dengan Python untuk Pencarian Berita
+TF-IDF Search Engine dengan Filter Relevansi dan Anti-Duplikat
 """
-
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -11,414 +8,365 @@ from sklearn.metrics.pairwise import cosine_similarity
 from flask import Flask, request, jsonify
 import os
 import logging
-import sys
-from waitress import serve
+from datetime import datetime
+import re
+import json
 
-# ================================
-# 🎯 CONFIGURATION - CSV di ROOT python_app
-# ================================
-# Dapatkan path direktori saat ini (python_app)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(BASE_DIR, 'preprocessed_news.csv')  # ← CSV di root python_app
-
-HOST = '127.0.0.1'
-PORT = 5000
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger(__name__)
-
-# ================================
-# 🧠 TF-IDF SEARCH ENGINE CLASS
-# ================================
 class TFIDFSearchEngine:
-    def __init__(self, csv_path: str):
+    def __init__(self, csv_path):
         self.csv_path = csv_path
         self.df = None
         self.vectorizer = None
         self.tfidf_matrix = None
-        self.is_initialized = False
+        self.stemmer = None
+        self.stopwords = None
+        self.initialized = False
 
     def initialize(self):
         """Initialize the search engine with CSV data"""
         try:
-            logger.info(f"📂 Loading CSV from: {self.csv_path}")
-
             if not os.path.exists(self.csv_path):
-                raise FileNotFoundError(f"CSV file not found: {self.csv_path}")
+                logging.error(f"CSV file not found: {self.csv_path}")
+                return False
 
-            # Load CSV data
-            self.df = pd.read_csv(self.csv_path)
-            logger.info(f"✅ CSV loaded successfully. Shape: {self.df.shape}")
+            # Load CSV dengan kolom yang sesuai dengan preprocessing Anda
+            self.df = pd.read_csv(self.csv_path, encoding='utf-8')
 
-            # Tampilkan sample data untuk debugging
-            logger.info(f"📊 Sample data - Columns: {self.df.columns.tolist()}")
-            if len(self.df) > 0:
-                sample_text = self.df.iloc[0]['text'] if 'text' in self.df.columns else self.df.iloc[0].get('processed', 'No text')
-                logger.info(f"📝 First record sample: {str(sample_text)[:100]}...")
+            # Pastikan kolom yang diperlukan ada
+            required_columns = ['text', 'processed']
+            for col in required_columns:
+                if col not in self.df.columns:
+                    logging.error(f"Required column '{col}' not found in CSV")
+                    return False
 
-            # Validasi kolom
-            if 'processed' not in self.df.columns:
-                logger.warning("Column 'processed' not found, using 'text' instead")
-                self.df['processed'] = self.df['text'].fillna('')
-            else:
-                self.df['processed'] = self.df['processed'].fillna(self.df['text'] if 'text' in self.df.columns else '')
-
-            # Handle missing values
+            # Isi NaN values
             self.df['processed'] = self.df['processed'].fillna('')
-            self.df = self.df[self.df['processed'].str.strip() != '']
+            self.df['text'] = self.df['text'].fillna('')
 
-            logger.info(f"🧹 Data cleaned. Final shape: {self.df.shape}")
-
-            # Initialize TF-IDF Vectorizer
+            # Inisialisasi TF-IDF Vectorizer
             self.vectorizer = TfidfVectorizer(
-                max_features=10000,
+                max_features=30000,
                 min_df=2,
                 max_df=0.8,
-                ngram_range=(1, 2),
-                stop_words=None  # We handle stopwords in preprocessing
+                ngram_range=(1, 2)  # Gunakan unigram dan bigram
             )
 
-            # Fit TF-IDF
+            # Fit dan transform data
             self.tfidf_matrix = self.vectorizer.fit_transform(self.df['processed'])
 
-            logger.info(f"🎯 TF-IDF initialized. Vocabulary size: {len(self.vectorizer.vocabulary_)}")
-            logger.info(f"📈 TF-IDF matrix shape: {self.tfidf_matrix.shape}")
-
-            self.is_initialized = True
+            self.initialized = True
+            logging.info(f"Search engine initialized with {len(self.df)} documents")
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize search engine: {str(e)}")
-            self.is_initialized = False
+            logging.error(f"Failed to initialize search engine: {str(e)}")
             return False
 
-    def search(self, query: str, top_k: int = 10):
-        """Search using TF-IDF and Cosine Similarity - TANPA BATASAN"""
-        if not self.is_initialized:
-            logger.error("Search engine not initialized")
+    def preprocess_query(self, query):
+        """Preprocess query seperti di Colab notebook"""
+        if not query:
+            return ""
+
+        # Case folding
+        query = str(query).lower()
+
+        # Remove special characters
+        query = re.sub(r'http\S+|www\S+|[^a-z0-9\s]', ' ', query)
+
+        # Tokenize
+        tokens = query.split()
+
+        # Stopword removal (sederhana)
+        stopwords = {'dan', 'atau', 'dengan', 'pada', 'untuk', 'dari', 'yang', 'di', 'ke'}
+        tokens = [tok for tok in tokens if tok not in stopwords]
+
+        return " ".join(tokens)
+
+    def search(self, query, top_k=10, min_similarity=0.1, deduplicate=True):
+        """
+        Search dengan filter relevansi dan anti-duplikat
+
+        Args:
+            query: Search query
+            top_k: Maximum number of results
+            min_similarity: Minimum similarity threshold (0-1)
+            deduplicate: Whether to remove duplicate content
+
+        Returns:
+            List of search results
+        """
+        if not self.initialized:
+            return []
+
+        # Preprocess query
+        q_prep = self.preprocess_query(query)
+        if not q_prep:
             return []
 
         try:
-            if not query or not query.strip():
+            # Transform query ke TF-IDF space
+            q_vec = self.vectorizer.transform([q_prep])
+
+            # Hitung cosine similarity
+            similarities = cosine_similarity(q_vec, self.tfidf_matrix).flatten()
+
+            # Filter berdasarkan threshold
+            threshold_mask = similarities > min_similarity
+            if not threshold_mask.any():
                 return []
 
-            # Preprocess query
-            query_processed = query.lower().strip()
+            # Dapatkan indices yang memenuhi threshold
+            relevant_indices = np.where(threshold_mask)[0]
+            relevant_scores = similarities[relevant_indices]
 
-            # Transform query to TF-IDF vector
-            query_vec = self.vectorizer.transform([query_processed])
-
-            # Calculate cosine similarity
-            similarities = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
-
-            # Get top K results - TANPA BATASAN, gunakan semua yang ada similarity > 0
-            if top_k == 'all' or top_k <= 0:
-                # Ambil semua hasil dengan similarity > 0.001
-                top_indices = np.where(similarities > 0.001)[0]
-                # Urutkan berdasarkan score tertinggi
-                top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
-            else:
-                # Ambil top K results
-                top_indices = similarities.argsort()[-top_k:][::-1]
+            # Urutkan berdasarkan score
+            sorted_indices = np.argsort(relevant_scores)[::-1]
 
             results = []
-            for idx in top_indices:
-                if similarities[idx] > 0.001:  # Minimum similarity threshold
-                    # Get document data
-                    doc_data = self.df.iloc[idx]
+            seen_content = set() if deduplicate else None
 
-                    results.append({
-                        'index': int(idx),
-                        'score': float(similarities[idx]),
-                        'similarity_percentage': round(similarities[idx] * 100, 2),
-                        'original_text': str(doc_data['text']) if 'text' in doc_data else '',
-                        'translated_text': str(doc_data['translated']) if 'translated' in doc_data else '',
-                        'processed_text': str(doc_data['processed']),
-                        'category': str(doc_data['category']) if 'category' in doc_data else 'General',
-                        'source': str(doc_data['source']) if 'source' in doc_data else 'CSV'
-                    })
+            for idx in sorted_indices:
+                if len(results) >= top_k * 2:  # Ambil lebih banyak untuk deduplikasi
+                    break
 
-            logger.info(f"🔍 Search: '{query}' → {len(results)} results (top_k: {top_k})")
-            return results
+                doc_idx = relevant_indices[idx]
+                score = relevant_scores[idx]
+
+                # Dapatkan data dokumen
+                doc = {
+                    'id': int(doc_idx) + 1,  # +1 karena database ID adalah 1-based (Laravel auto-increment)
+                    'text': str(self.df.iloc[doc_idx]['text']),
+                    'similarity': float(score),
+                    'category': str(self.df.iloc[doc_idx].get('category', '')),
+                    'source': str(self.df.iloc[doc_idx].get('source', '')),
+                    'processed': str(self.df.iloc[doc_idx]['processed'])
+                }
+
+                # Tambahkan translated jika ada
+                if 'translated' in self.df.columns:
+                    doc['translated'] = str(self.df.iloc[doc_idx]['translated'])
+
+                # Cek duplikat jika diaktifkan
+                if deduplicate:
+                    # Gunakan processed text untuk deteksi duplikat
+                    content_key = doc['processed'][:100]  # Ambil 100 karakter pertama
+
+                    # Skip jika konten terlalu mirip dengan yang sudah ada
+                    is_duplicate = False
+                    for seen in seen_content:
+                        if self._calculate_similarity(content_key, seen) > 0.9:
+                            is_duplicate = True
+                            break
+
+                    if not is_duplicate:
+                        seen_content.add(content_key)
+                        results.append(doc)
+                else:
+                    results.append(doc)
+
+            # Batasi hasil akhir
+            final_results = results[:top_k]
+
+            # Hitung statistik
+            stats = {
+                'total_found': len(relevant_indices),
+                'filtered_out': len(relevant_indices) - len(final_results),
+                'min_similarity': min_similarity,
+                'average_similarity': float(np.mean([r['similarity'] for r in final_results])) if final_results else 0
+            }
+
+            return final_results, stats
 
         except Exception as e:
-            logger.error(f"❌ Search error: {str(e)}")
-            return []
+            logging.error(f"Search error: {str(e)}")
+            return [], {}
 
-    def get_document(self, doc_id: int):
-        """Get document by ID"""
-        if not self.is_initialized or doc_id >= len(self.df):
+    def _calculate_similarity(self, text1, text2):
+        """Calculate similarity between two texts"""
+        if not text1 or not text2:
+            return 0.0
+
+        # Simple Jaccard similarity
+        set1 = set(text1.split())
+        set2 = set(text2.split())
+
+        if not set1 or not set2:
+            return 0.0
+
+        intersection = len(set1.intersection(set2))
+        union = len(set1.union(set2))
+
+        return intersection / union if union > 0 else 0.0
+
+    def get_stats(self):
+        """Get engine statistics"""
+        if not self.initialized:
+            return {}
+
+        return {
+            'total_documents': len(self.df),
+            'vocabulary_size': len(self.vectorizer.get_feature_names_out()),
+            'is_initialized': self.initialized,
+            'csv_file_exists': os.path.exists(self.csv_path),
+            'last_update': datetime.now().isoformat()
+        }
+
+    def get_document(self, doc_id):
+        """Get specific document by ID (1-based from Laravel)"""
+        # Konversi dari 1-based (Laravel) ke 0-based (Python array)
+        doc_index = doc_id - 1
+
+        if not self.initialized or doc_index < 0 or doc_index >= len(self.df):
             return None
 
         try:
-            doc_data = self.df.iloc[doc_id]
-            return {
-                'id': doc_id,
-                'original_text': str(doc_data['text']) if 'text' in doc_data else '',
-                'translated_text': str(doc_data['translated']) if 'translated' in doc_data else '',
-                'processed_text': str(doc_data['processed']),
-                'category': str(doc_data['category']) if 'category' in doc_data else 'General',
-                'source': str(doc_data['source']) if 'source' in doc_data else 'CSV'
-            }
+            doc = self.df.iloc[doc_index].to_dict()
+            doc['id'] = doc_id  # Return 1-based ID
+            return doc
         except Exception as e:
-            logger.error(f"Error getting document {doc_id}: {str(e)}")
+            logging.error(f"Failed to get document {doc_id}: {str(e)}")
             return None
 
-    def get_stats(self):
-        """Get search engine statistics"""
-        if not self.is_initialized:
-            return {'status': 'not_initialized'}
-
-        return {
-            'status': 'initialized',
-            'total_documents': len(self.df),
-            'vocabulary_size': len(self.vectorizer.vocabulary_),
-            'matrix_shape': self.tfidf_matrix.shape,
-            'csv_path': self.csv_path,
-            'columns': self.df.columns.tolist(),
-            'sample_records': min(5, len(self.df))
-        }
-
-# ================================
-# 🌐 FLASK APP & ROUTES
-# ================================
+# Flask App Setup
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Global search engine instance
-search_engine = TFIDFSearchEngine(CSV_PATH)
+search_engine = None
 
-@app.route('/')
-def home():
-    """Home page dengan info endpoints"""
-    return jsonify({
-        'message': 'Python TF-IDF Search Engine API',
-        'endpoints': {
-            'GET /health': 'Health check',
-            'GET /stats': 'Engine statistics',
-            'GET /search?query=text&top_k=10': 'Search documents',
-            'GET /document/<id>': 'Get document by ID',
-            'GET /test?query=text': 'Test search',
-            'POST /init': 'Manual initialization'
-        },
-        'status': 'running',
-        'csv_location': CSV_PATH
-    })
+def initialize_engine():
+    """Initialize search engine - called at startup"""
+    global search_engine
+    csv_path = os.path.join(os.path.dirname(__file__), 'preprocessed_news.csv')
+    search_engine = TFIDFSearchEngine(csv_path)
+    search_engine.initialize()
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy' if search_engine.is_initialized else 'unhealthy',
-        'engine_initialized': search_engine.is_initialized,
-        'service': 'python_tfidf_search',
-        'csv_file_exists': os.path.exists(CSV_PATH),
-        'csv_location': CSV_PATH,
-        'timestamp': pd.Timestamp.now().isoformat()
-    })
+    status = {
+        'status': 'ok',
+        'engine_initialized': search_engine.initialized if search_engine else False,
+        'csv_file_exists': os.path.exists(search_engine.csv_path) if search_engine else False,
+        'timestamp': datetime.now().isoformat()
+    }
+    return jsonify(status)
 
 @app.route('/stats', methods=['GET'])
 def get_stats():
-    """Get search engine statistics"""
-    try:
-        stats = search_engine.get_stats()
-        return jsonify({
-            'success': True,
-            'stats': stats
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    """Get engine statistics"""
+    if not search_engine or not search_engine.initialized:
+        return jsonify({'error': 'Engine not initialized'}), 503
 
-@app.route('/search', methods=['GET', 'POST'])
+    stats = search_engine.get_stats()
+    return jsonify({'stats': stats})
+
+@app.route('/search', methods=['GET'])
 def search():
-    """Search endpoint - MAIN API - SUPPORT ALL RESULTS"""
+    """Search endpoint dengan filter"""
+    if not search_engine or not search_engine.initialized:
+        return jsonify({'error': 'Engine not initialized'}), 503
+
     try:
-        # Check if engine is initialized
-        if not search_engine.is_initialized:
-            return jsonify({'error': 'Search engine not initialized'}), 500
-
         # Get parameters
-        if request.method == 'POST':
-            data = request.get_json()
-            query = data.get('query', '')
-            top_k = data.get('top_k', 10)
-        else:
-            query = request.args.get('query', '')
-            top_k = request.args.get('top_k', 10)
+        query = request.args.get('query', '')
+        top_k = request.args.get('top_k', 10)
+        min_similarity = request.args.get('min_similarity', 0.1)
+        deduplicate = request.args.get('deduplicate', 'true').lower() == 'true'
 
-        if not query:
-            return jsonify({'error': 'Query parameter is required'}), 400
-
-        # Handle 'all' parameter
+        # Parse top_k
         if top_k == 'all':
-            top_k = 'all'  # Kirim string 'all' ke search engine
+            top_k = 1000  
         else:
             try:
                 top_k = int(top_k)
-                # Batasi maksimal 1000 untuk performance
-                top_k = min(top_k, 1000)
-            except (ValueError, TypeError):
+            except:
                 top_k = 10
 
+        # Parse min_similarity
+        try:
+            min_similarity = float(min_similarity)
+            if min_similarity < 0 or min_similarity > 1:
+                min_similarity = 0.1
+        except:
+            min_similarity = 0.1
+
         # Perform search
-        results = search_engine.search(query, top_k)
+        results, stats = search_engine.search(
+            query=query,
+            top_k=top_k,
+            min_similarity=min_similarity,
+            deduplicate=deduplicate
+        )
 
         return jsonify({
-            'success': True,
             'query': query,
-            'top_k': top_k,
-            'results_count': len(results),
             'results': results,
-            'engine': 'python_tfidf',
-            'timestamp': pd.Timestamp.now().isoformat()
+            'results_count': len(results),
+            'stats': stats,
+            'parameters': {
+                'top_k': top_k,
+                'min_similarity': min_similarity,
+                'deduplicate': deduplicate
+            }
         })
 
     except Exception as e:
-        logger.error(f"Search API error: {str(e)}")
+        logging.error(f"Search endpoint error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/document/<int:doc_id>', methods=['GET'])
 def get_document(doc_id):
-    """Get document by ID"""
-    try:
-        if not search_engine.is_initialized:
-            return jsonify({'error': 'Search engine not initialized'}), 500
+    """Get specific document"""
+    if not search_engine or not search_engine.initialized:
+        return jsonify({'error': 'Engine not initialized'}), 503
 
+    try:
         document = search_engine.get_document(doc_id)
         if document:
-            return jsonify({
-                'success': True,
-                'document': document
-            })
+            return jsonify({'document': document})
         else:
             return jsonify({'error': 'Document not found'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/test', methods=['GET'])
-def test_search():
-    """Test search dengan sample query"""
+@app.route('/rebuild', methods=['POST'])
+def rebuild():
+    """Rebuild search engine"""
+    global search_engine
+
     try:
-        if not search_engine.is_initialized:
-            return jsonify({'error': 'Search engine not initialized'}), 500
-
-        query = request.args.get('query', 'gempa')
-        results = search_engine.search(query, 5)
-
-        return jsonify({
-            'success': True,
-            'query': query,
-            'results_count': len(results),
-            'sample_results': [
-                {
-                    'index': r['index'],
-                    'score': r['score'],
-                    'similarity_percentage': r['similarity_percentage'],
-                    'preview_text': r['original_text'][:150] + '...' if len(r['original_text']) > 150 else r['original_text']
-                }
-                for r in results[:3]  # Hanya ambil 3 sample
-            ]
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/init', methods=['POST', 'GET'])
-def manual_init():
-    """Manual initialization endpoint"""
-    try:
+        csv_path = os.path.join(os.path.dirname(__file__), 'preprocessed_news.csv')
+        search_engine = TFIDFSearchEngine(csv_path)
         success = search_engine.initialize()
+
         if success:
             return jsonify({
                 'success': True,
-                'message': 'Search engine initialized successfully'
+                'message': 'Search engine rebuilt successfully',
+                'stats': search_engine.get_stats()
             })
         else:
             return jsonify({
                 'success': False,
-                'message': 'Failed to initialize search engine'
+                'message': 'Failed to rebuild search engine'
             }), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ================================
-# 🚀 STARTUP & MAIN
-# ================================
-def check_dependencies():
-    """Check if required packages are installed"""
-    try:
-        import pandas
-        import sklearn
-        import flask
-        import waitress
-        logger.info("✅ All dependencies are installed")
-        return True
-    except ImportError as e:
-        logger.error(f"❌ Missing dependency: {e}")
-        return False
-
-def main():
-    """Main function to start the server"""
-    print("🚀" + "="*60)
-    print("   Python TF-IDF Search Engine Server")
-    print("="*60)
-
-    # Display current directory and CSV path
-    print(f"📁 Current directory: {BASE_DIR}")
-    print(f"📊 CSV file location: {CSV_PATH}")
-    print("="*60)
-
-    # Check dependencies
-    if not check_dependencies():
-        print("❌ Please install dependencies:")
-        print("   pip install pandas scikit-learn flask waitress")
-        return
-
-    # Check CSV file
-    if not os.path.exists(CSV_PATH):
-        print(f"❌ CSV file not found: {CSV_PATH}")
-        print("Please make sure preprocessed_news.csv is in the same folder as this script")
-        print("Current files in directory:")
-        for file in os.listdir(BASE_DIR):
-            print(f"   - {file}")
-        return
-
-    print(f"✅ CSV file found: {CSV_PATH}")
-
-    # Initialize search engine
-    print("🔧 Initializing TF-IDF Search Engine...")
-    success = search_engine.initialize()
-
-    if not success:
-        print("❌ Failed to initialize search engine. Check the CSV file format.")
-        return
-
-    print("✅ TF-IDF Search Engine initialized successfully!")
-    print("🌐 Starting server...")
-    print("="*60)
-
-    # Display endpoints info
-    print("\n📍 AVAILABLE ENDPOINTS:")
-    print("   GET  /              - Server info")
-    print("   GET  /health        - Health check")
-    print("   GET  /stats         - Engine statistics")
-    print("   GET  /search        - Search (query, top_k)")
-    print("   GET  /document/<id> - Get document by ID")
-    print("   GET  /test          - Test search")
-    print("   POST /init          - Manual re-initialize")
-    print("\n🔍 EXAMPLE USAGE:")
-    print(f"   curl http://{HOST}:{PORT}/health")
-    print(f'   curl "http://{HOST}:{PORT}/search?query=gempa&top_k=all"')
-    print(f"   curl http://{HOST}:{PORT}/document/0")
-    print("="*60)
-    print("Server is running. Press Ctrl+C to stop.")
-    print("="*60)
-
-    # Start production server
-    serve(app, host=HOST, port=PORT)
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
-    main()
+    # Initialize engine on startup
+    csv_path = os.path.join(os.path.dirname(__file__), 'preprocessed_news.csv')
+    search_engine = TFIDFSearchEngine(csv_path)
+
+    if search_engine.initialize():
+        print(f"✅ Search engine initialized with {len(search_engine.df)} documents")
+        print(f"📊 Vocabulary size: {len(search_engine.vectorizer.get_feature_names_out())}")
+    else:
+        print("❌ Failed to initialize search engine")
+
+    # Run Flask app
+    app.run(host='127.0.0.1', port=5000, debug=False)

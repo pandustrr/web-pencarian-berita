@@ -43,26 +43,98 @@ class PythonSearchService
     }
 
     /**
-     * Search dengan timeout reasonable
+     * Search dengan filter relevansi dan anti-duplikat
      */
-    public function search(string $query, int $topK = 10)
+    public function search(string $query, int $topK = 10, float $minSimilarity = 0.1, bool $deduplicate = true)
     {
         try {
-            $response = Http::timeout(10)->get("{$this->baseUrl}/search", [
+            $response = Http::timeout(15)->get("{$this->baseUrl}/search", [
                 'query' => $query,
-                'top_k' => $topK
+                'top_k' => $topK,
+                'min_similarity' => $minSimilarity,
+                'deduplicate' => $deduplicate ? 'true' : 'false'
             ]);
 
             if ($response->successful()) {
-                return $response->json();
+                $data = $response->json();
+
+                // Tambahkan post-processing di Laravel side
+                if (!empty($data['results'])) {
+                    $data['results'] = $this->postProcessResults($data['results'], $query);
+                }
+
+                return $data;
             }
 
-            return null;
+            return ['results' => [], 'stats' => ['total_found' => 0]];
 
         } catch (Exception $e) {
-            Log::warning("Python search timeout", ['query' => $query]);
-            return null;
+            Log::warning("Python search timeout", [
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+            return ['results' => [], 'stats' => ['total_found' => 0]];
         }
+    }
+
+    /**
+     * Post-process results untuk filter tambahan
+     */
+    private function postProcessResults(array $results, string $query): array
+    {
+        $processed = [];
+        $queryKeywords = $this->extractKeywords($query);
+
+        foreach ($results as $result) {
+            // Hitung relevance score tambahan
+            $relevanceScore = $this->calculateRelevanceScore($result, $queryKeywords);
+            $result['relevance_score'] = $relevanceScore;
+
+            // Filter berdasarkan relevance score minimum
+            if ($relevanceScore >= 0.2) {
+                $processed[] = $result;
+            }
+        }
+
+        // Urutkan berdasarkan relevance score
+        usort($processed, function($a, $b) {
+            return ($b['relevance_score'] ?? 0) <=> ($a['relevance_score'] ?? 0);
+        });
+
+        return $processed;
+    }
+
+    /**
+     * Ekstrak keywords dari query
+     */
+    private function extractKeywords(string $query): array
+    {
+        $stopwords = ['dan', 'atau', 'dengan', 'pada', 'untuk', 'dari', 'yang', 'di', 'ke'];
+        $words = preg_split('/\s+/', strtolower($query));
+
+        return array_filter($words, function($word) use ($stopwords) {
+            return !in_array($word, $stopwords) && strlen($word) > 2;
+        });
+    }
+
+    /**
+     * Hitung relevance score tambahan
+     */
+    private function calculateRelevanceScore(array $result, array $queryKeywords): float
+    {
+        $text = strtolower($result['original_text'] ?? $result['text'] ?? '');
+        $score = 0;
+
+        foreach ($queryKeywords as $keyword) {
+            if (strpos($text, $keyword) !== false) {
+                $score += 0.2; // Bonus untuk exact match
+            }
+        }
+
+        // Tambahkan similarity score dari Python
+        $score += ($result['similarity'] ?? 0) * 0.8;
+
+        return min($score, 1.0);
     }
 
     public function getStats()
@@ -81,6 +153,20 @@ class PythonSearchService
             $response = Http::timeout(5)->get("{$this->baseUrl}/document/{$docId}");
             return $response->successful() ? $response->json() : null;
         } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Rebuild search engine dengan parameter baru
+     */
+    public function rebuildEngine()
+    {
+        try {
+            $response = Http::timeout(30)->post("{$this->baseUrl}/rebuild");
+            return $response->successful() ? $response->json() : null;
+        } catch (Exception $e) {
+            Log::error("Failed to rebuild engine", ['error' => $e->getMessage()]);
             return null;
         }
     }

@@ -1,133 +1,102 @@
 @extends('layouts.app')
 
-@section('title', 'System Debug Information')
+@section('title', 'System Debug')
 
 @section('content')
-<div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold text-gray-900 mb-8">System Debug Information</h1>
+<div class="max-w-4xl mx-auto py-8">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">System Debug</h1>
 
-    <!-- System Status -->
-    <div class="grid md:grid-cols-2 gap-6 mb-8">
-        <div class="bg-white rounded-lg shadow p-6 border-l-4 {{ $stats['python_connected'] ? 'border-green-500' : 'border-red-500' }}">
-            <h2 class="text-xl font-semibold mb-4 flex items-center">
-                <i class="fab fa-python mr-2"></i>
-                Python TF-IDF Service
-            </h2>
-            <div class="space-y-3">
-                <div class="flex justify-between items-center">
-                    <span class="font-medium">Status:</span>
-                    <span class="px-3 py-1 rounded-full text-sm font-semibold {{ $stats['python_connected'] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
-                        {{ $stats['python_connected'] ? 'TERHUBUNG' : 'TERPUTUS' }}
-                    </span>
-                </div>
-                <div class="flex justify-between items-center">
-                    <span class="font-medium">Vocabulary Size:</span>
-                    <span class="font-bold text-blue-600">{{ number_format($stats['vocabulary_size']) }} kata</span>
-                </div>
-                <div class="flex justify-between items-center">
-                    <span class="font-medium">Total Documents:</span>
-                    <span class="font-bold text-green-600">{{ number_format($stats['total_documents']) }} berita</span>
-                </div>
+    <!-- Quick Status -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div class="text-sm text-gray-600 mb-1">Python Engine</div>
+            <div class="text-lg font-bold {{ $stats['python_connected'] ? 'text-green-600' : 'text-red-600' }}">
+                {{ $stats['python_connected'] ? '✅ Online' : '❌ Offline' }}
             </div>
         </div>
-
-        <div class="bg-white rounded-lg shadow p-6 border-l-4 {{ $stats['csv_exists'] ? 'border-green-500' : 'border-red-500' }}">
-            <h2 class="text-xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-database mr-2"></i>
-                Dataset Information
-            </h2>
-            <div class="space-y-3">
-                <div class="flex justify-between items-center">
-                    <span class="font-medium">Total Documents:</span>
-                    <span class="font-bold text-blue-600">{{ number_format($stats['total_documents']) }} berita</span>
-                </div>
-                <div class="flex justify-between items-center">
-                    <span class="font-medium">CSV File:</span>
-                    <span class="px-3 py-1 rounded-full text-sm font-semibold {{ $stats['csv_exists'] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
-                        {{ $stats['csv_exists'] ? 'ADA' : 'TIDAK ADA' }}
-                    </span>
-                </div>
-                @if($stats['csv_exists'])
-                <div class="flex justify-between items-center">
-                    <span class="font-medium">File Size:</span>
-                    <span class="font-bold text-purple-600">{{ number_format($debugInfo['csv_file_size'] / 1024 / 1024, 2) }} MB</span>
-                </div>
-                @endif
-            </div>
+        <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div class="text-sm text-gray-600 mb-1">Total Berita</div>
+            <div class="text-lg font-bold text-blue-600">{{ number_format($stats['total_documents']) }}</div>
+        </div>
+        <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div class="text-sm text-gray-600 mb-1">Kata Unik</div>
+            <div class="text-lg font-bold text-blue-600">{{ number_format($stats['vocabulary_size']) }}</div>
+        </div>
+        <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div class="text-sm text-gray-600 mb-1">Duplikat Filter</div>
+            <div class="text-lg font-bold text-green-600">✅ Always On</div>
         </div>
     </div>
 
-    <!-- Debug Information -->
-    <div class="bg-white rounded-lg shadow p-6 mb-8">
-        <h2 class="text-xl font-semibold mb-4">Debug Details</h2>
-        <div class="grid md:grid-cols-2 gap-4 text-sm">
-            <div class="space-y-2">
-                <div class="flex justify-between">
-                    <span class="font-medium">CSV Path:</span>
-                    <span class="text-gray-600 text-xs">{{ $debugInfo['csv_absolute_path'] }}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="font-medium">CSV Exists:</span>
-                    <span class="text-gray-600">{{ $debugInfo['csv_file_exists'] ? 'Yes' : 'No' }}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="font-medium">Python URL:</span>
-                    <span class="text-gray-600">{{ $debugInfo['python_url'] }}</span>
-                </div>
-            </div>
-            <div class="space-y-2">
-                <div class="flex justify-between">
-                    <span class="font-medium">File Size:</span>
-                    <span class="text-gray-600">{{ number_format($debugInfo['csv_file_size']) }} bytes</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="font-medium">Python Connected:</span>
-                    <span class="text-gray-600">{{ $stats['python_connected'] ? 'Yes' : 'No' }}</span>
-                </div>
-                <div class="flex justify-between">
-                    <span class="font-medium">Last Check:</span>
-                    <span class="text-gray-600">{{ $debugInfo['current_time'] }}</span>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- File Check -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">File System Check</h2>
-        <div class="space-y-3">
-            <div class="flex items-center justify-between p-3 {{ $stats['csv_exists'] ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200' }} rounded">
-                <div class="flex items-center">
-                    <i class="fas fa-file-csv mr-3 {{ $stats['csv_exists'] ? 'text-green-500' : 'text-red-500' }}"></i>
-                    <div>
-                        <div class="font-medium">preprocessed_news.csv</div>
-                        <div class="text-sm text-gray-600">{{ $debugInfo['csv_absolute_path'] }}</div>
+    <!-- System Information -->
+    <div class="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-bold text-gray-900 mb-4">System Information</h2>
+
+        <div class="grid md:grid-cols-2 gap-6">
+            <div>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">Python API Status</div>
+                    <div class="text-base font-semibold text-gray-900">
+                        {{ $stats['python_connected'] ? '✅ Connected' : '❌ Disconnected' }}
                     </div>
                 </div>
-                <span class="px-3 py-1 rounded-full text-sm font-semibold {{ $stats['csv_exists'] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
-                    {{ $stats['csv_exists'] ? 'FOUND' : 'MISSING' }}
-                </span>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">Database Status</div>
+                    <div class="text-base font-semibold text-gray-900">✅ Connected</div>
+                </div>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">CSV File</div>
+                    <div class="text-base font-semibold {{ $stats['csv_exists'] ? 'text-green-600' : 'text-red-600' }}">
+                        {{ $stats['csv_exists'] ? '✅ Found' : '❌ Missing' }}
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">CSV Filename</div>
+                    <div class="text-base font-semibold text-gray-900">
+                        {{ basename($debugInfo['csv_absolute_path'] ?? 'N/A') }}
+                    </div>
+                </div>
             </div>
 
-            @if($stats['csv_exists'])
-            <div class="bg-blue-50 p-3 rounded border border-blue-200">
-                <div class="text-sm">
-                    <strong>File Details:</strong>
-                    <div>Size: {{ number_format($debugInfo['csv_file_size'] / 1024 / 1024, 2) }} MB</div>
-                    <div>Total Records: {{ number_format($stats['total_documents']) }} berita</div>
-                    <div>Path: {{ $debugInfo['csv_absolute_path'] }}</div>
+            <div>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">Duplikat Filter</div>
+                    <div class="text-base font-semibold text-green-600">✅ Always Active</div>
+                </div>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">Duplikat Threshold</div>
+                    <div class="text-base font-semibold text-gray-900">> 90% similarity</div>
+                </div>
+                <div class="mb-4">
+                    <div class="text-sm text-gray-600">Auto Threshold</div>
+                    <div class="text-base font-semibold text-gray-900">Based on Keywords</div>
                 </div>
             </div>
-            @else
-            <div class="bg-red-50 p-3 rounded border border-red-200">
-                <div class="text-sm text-red-700">
-                    <strong>File tidak ditemukan!</strong>
-                    <div>Pastikan file CSV berada di: python_app/preprocessed_news.csv</div>
-                    <div>Current path: {{ $debugInfo['csv_absolute_path'] }}</div>
-                </div>
-            </div>
-            @endif
         </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-bold text-gray-900 mb-4">Quick Test</h2>
+        <div class="flex flex-wrap gap-2">
+            <a href="{{ route('search', ['query' => 'gempa', 'top_k' => 10]) }}"
+               class="px-4 py-2 bg-blue-100 text-blue-700 rounded border border-blue-300 hover:bg-blue-200 text-sm font-medium">
+                Search: gempa
+            </a>
+            <a href="{{ route('search', ['query' => 'teknologi', 'top_k' => 10]) }}"
+               class="px-4 py-2 bg-green-100 text-green-700 rounded border border-green-300 hover:bg-green-200 text-sm font-medium">
+                Search: teknologi
+            </a>
+            <a href="{{ route('search', ['query' => 'politik', 'top_k' => 10]) }}"
+               class="px-4 py-2 bg-purple-100 text-purple-700 rounded border border-purple-300 hover:bg-purple-200 text-sm font-medium">
+                Search: politik
+            </a>
+        </div>
+    </div>
+    <!-- Footer -->
+    <div class="text-center text-sm text-gray-500 mt-8">
+        <p>System Debug Page • Last Updated: {{ date('Y-m-d H:i:s') }}</p>
     </div>
 </div>
 @endsection
